@@ -1,0 +1,38 @@
+name: Manter Supabase ativo
+
+# Roda a cada 3 dias (o Supabase grátis só pausa após ~7 dias sem atividade).
+# Qualquer consulta ao banco reinicia esse contador, mantendo o projeto ativo de graça.
+on:
+  schedule:
+    - cron: "0 12 */3 * *"   # a cada 3 dias, 12:00 UTC (~09:00 no horário de Brasília)
+  workflow_dispatch: {}       # permite também rodar manualmente pelo botão "Run workflow"
+
+permissions:
+  contents: write             # necessário para o carimbo que mantém o Actions ativo
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Consulta leve no banco (mantém o Supabase ativo)
+        env:
+          SUPABASE_URL: https://kupgocnebynhpnkijajd.supabase.co
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/leads?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "Resposta do Supabase: HTTP $code"
+          # 200 (ok) ou 206 são sucesso. Qualquer resposta já conta como atividade.
+
+      - name: Carimbo de data (mantém o próprio Actions ativo)
+        run: |
+          date -u > last-ping.txt
+          git config user.name  "keepalive-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add last-ping.txt
+          git commit -m "keepalive $(date -u +%F)" || exit 0
+          git push
