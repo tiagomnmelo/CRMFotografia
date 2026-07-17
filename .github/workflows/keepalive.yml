@@ -1,14 +1,12 @@
 name: Manter Supabase ativo
 
-# Roda a cada 3 dias (o Supabase grátis só pausa após ~7 dias sem atividade).
-# Qualquer consulta ao banco reinicia esse contador, mantendo o projeto ativo de graça.
 on:
   schedule:
-    - cron: "0 12 */3 * *"   # a cada 3 dias, 12:00 UTC (~09:00 no horário de Brasília)
-  workflow_dispatch: {}       # permite também rodar manualmente pelo botão "Run workflow"
+    - cron: "0 12 */3 * *"   # a cada 3 dias
+  workflow_dispatch: {}
 
 permissions:
-  contents: write             # necessário para o carimbo que mantém o Actions ativo
+  contents: write
 
 jobs:
   ping:
@@ -16,23 +14,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Consulta leve no banco (mantém o Supabase ativo)
-        env:
-          SUPABASE_URL: https://kupgocnebynhpnkijajd.supabase.co
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      - name: Consulta leve no banco (mantem o Supabase ativo)
         run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            "$SUPABASE_URL/rest/v1/leads?select=id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          code=$(curl -sS --retry 4 --retry-delay 5 --max-time 30 \
+            -o /dev/null -w "%{http_code}" \
+            "https://kupgocnebynhpnkijajd.supabase.co/rest/v1/leads?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}") || true
           echo "Resposta do Supabase: HTTP $code"
-          # 200 (ok) ou 206 são sucesso. Qualquer resposta já conta como atividade.
+          if [ "$code" = "200" ] || [ "$code" = "206" ]; then
+            echo "OK: projeto ATIVO e keep-alive funcionando."
+          elif [ "$code" = "401" ]; then
+            echo "Projeto ATIVO, mas a chave (secret SUPABASE_ANON_KEY) esta errada ou vazia."
+          elif [ "$code" = "404" ]; then
+            echo "Projeto ATIVO (a tabela 'leads' respondeu 404 - tanto faz para o keep-alive)."
+          else
+            echo "SEM RESPOSTA VALIDA ($code). O projeto provavelmente esta PAUSADO."
+            echo "Restaure no painel do Supabase e rode este workflow de novo."
+          fi
 
-      - name: Carimbo de data (mantém o próprio Actions ativo)
+      - name: Carimbo para manter o agendamento ativo
         run: |
-          date -u > last-ping.txt
           git config user.name  "keepalive-bot"
           git config user.email "bot@users.noreply.github.com"
+          date -u > last-ping.txt
           git add last-ping.txt
-          git commit -m "keepalive $(date -u +%F)" || exit 0
-          git push
+          git commit -m "keepalive $(date -u +%F)" >/dev/null 2>&1 || true
+          git push >/dev/null 2>&1 || true
+          echo "carimbo ok"
